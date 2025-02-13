@@ -1,24 +1,11 @@
-
 --!strict
 --!optimize 2
 --!native
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local Jecs = require(ReplicatedStorage.Packages.Jecs)
-local Dictionary = require(ReplicatedStorage.Packages.Freeze).Dictionary
-local Wildcard = Jecs.Wildcard
-local ref = require(ReplicatedStorage.Hooks.ref)
-local world = require(ReplicatedStorage.World)
-local isServer = game:GetService("RunService"):IsServer()
-local pair = Jecs.pair
-local refs = require(ReplicatedStorage.refs)
-
-local onRemove = Jecs.OnRemove
-
-type pair<First, Second> = number & { __relation: First }
-type entity<T = nil> = number & { __T: T }
-type component<T = nil> = entity<T> | pair<entity<T>, entity<unknown>>
+-- type pair<First, Second> = number & { __relation: First }
+-- type entity<T = nil> = number & { __T: T }
+-- type component<T = nil> = entity<T> | pair<entity<T>, entity<unknown>>
+type targets = { [number]: number }
 
 type NIL_VALUE = "__n"
 local NIL_VALUE: NIL_VALUE = "__n"
@@ -26,9 +13,14 @@ local NIL_VALUE: NIL_VALUE = "__n"
 type DELETE_VALUE = "__d"
 local DELETE_VALUE: DELETE_VALUE = "__d"
 
+export type EntityValues = {
+	[string]: {
+		[string]: any,
+	},
+}
 export type EntityChanges = {
-	[string]: DELETE_VALUE | { --entity<any>]: {
-		[string]: any, --component<any>]: any,
+	[string]: DELETE_VALUE | {
+		[string]: any,
 	},
 }
 export type Packet = {
@@ -37,6 +29,33 @@ export type Packet = {
 }
 
 export type PlayerObject = Player | { Player } | nil
+
+local isServer = game:GetService("RunService"):IsServer()
+
+local jecs = require("../roblox_packages/Jecs")
+local equals = require("dictionaryEquals")
+local ref = require("ref")
+local refs = require("refs")
+
+local pair = jecs.pair
+local onRemove = jecs.OnRemove
+local Wildcard = jecs.Wildcard
+local previous: EntityValues = {}
+
+local ECS_ENTITY_MASK = bit32.lshift(1, 24)
+local ECS_ID_FLAGS_MASK = 0x10
+
+local world: jecs.World, replicated: jecs.Id<PlayerObject>, queries: {jecs.Query<any>} = nil, nil, {}
+local feces = {
+	component = replicated,
+}
+
+-- PRIVATE FUNCTIONS
+local function assertNumber(str: string): number
+	local result = tonumber(str)
+	assert(type(result) == "number", str .. " is not a number")
+	return result
+end
 
 local function makePacket(plr: Player?): Packet
 	return {
@@ -80,8 +99,6 @@ end
 --- If there is a (shallow) difference in the object it will return the current object, else nil
 local function componentChanges<T>(prevComponentValue: T | {}, currComponentValue: T | {}): NIL_VALUE | T | {} | nil
 	--new value is nil, then change to nil
-	
-	
 	if currComponentValue == nil then
 		if prevComponentValue == NIL_VALUE then
 			return
@@ -118,7 +135,7 @@ local function componentChanges<T>(prevComponentValue: T | {}, currComponentValu
 	end
 
 	if type1 == "table" and type2 == "table" then
-		if not Dictionary.equals(currComponentValue, prevComponentValue) then
+		if not equals(currComponentValue, prevComponentValue) then
 			return currComponentValue
 		end
 	end
@@ -134,7 +151,7 @@ local function reverseRef(entity: number): number?
 		return entity
 	end
 	for key, value in refs :: { number } do
-		if tonumber(value) == tonumber(entity) then
+		if value == entity then
 			return key
 		end
 	end
@@ -142,48 +159,42 @@ local function reverseRef(entity: number): number?
 	return entity
 end
 
-local storage = {}
-local previous: EntityChanges = {}
 local function addChanges(
-	entity,
-	componentId,
+	entity: string,
+	componentId: number,
 	componentValue,
-	group,
-	key,
-	playerValue
+	group: { public: Packet } & { [Player]: Packet },
+	playerValue: PlayerObject
 )
-	componentId = tostring(componentId)
+	local stringComponentId = tostring(componentId)
 	previous[entity] = if previous[entity] then previous[entity] else {}
-	local changes = componentChanges(previous[entity][componentId], componentValue)
+
+	local changes = componentChanges(previous[entity][stringComponentId], componentValue)
 	if changes == nil then
 		return --NO DIFFERENCE IN VALUE
 	end
 
 	local players: { Player }? = getPlayers(playerValue)
-	previous[entity][componentId] = changes
+	previous[entity][stringComponentId] = changes
 
-	entity = tostring(reverseRef(tonumber(entity)))
+	entity = tostring(reverseRef(assertNumber(entity)))
 	-- add to the map of previous entities and constantly check if the world contains them
 	--find the right packet to edit and add the component's diff
 	if players == nil then
 		--add to public packet
 		group.public.entities[entity] = group.public.entities[entity] or {}
-		group.public.entities[entity][componentId] = changes
+		group.public.entities[entity][stringComponentId] = changes
 	else
 		for _, player in players do
 			group[player] = group[player] or makePacket(player);
-			(group[player] :: Packet).entities[entity] = (group[player].entities :: Packet)[entity] or {};
-			(group[player] :: Packet).entities[entity][componentId] = changes;
+			group[player].entities[entity] = group[player].entities[entity] or {};
+			group[player].entities[entity][stringComponentId] = changes;
 		end
 	end
 end
-local ECS_ENTITY_MASK = bit32.lshift(1, 24)
-local ECS_ID_FLAGS_MASK = 0x10
 
-local replicated = require(ReplicatedStorage.Components).Replicated
-type targets = { [number]: number }?
 
-local function target(archetype, index)
+local function target(archetype, index): jecs.Id<any>?
 	local nth = index or 0
 	local idr = world.componentIndex[pair(replicated, Wildcard)]
 	if not idr then
@@ -205,11 +216,10 @@ local function target(archetype, index)
 		return
 	end
 
-	return Jecs.entity_index_get_alive(world.entity_index, if nth > ECS_ENTITY_MASK then (nth // ECS_ID_FLAGS_MASK) % ECS_ENTITY_MASK else nth)
+	return jecs.entity_index_get_alive(world.entity_index, if nth > ECS_ENTITY_MASK then (nth // ECS_ID_FLAGS_MASK) % ECS_ENTITY_MASK else nth)
 end
 
 local function getAllTargets(archetype, index: number, targets: targets): targets
-	targets = targets or {}
 	local componentId = target(archetype, index)
 	if not componentId then
 		return targets
@@ -219,31 +229,39 @@ local function getAllTargets(archetype, index: number, targets: targets): target
 	return getAllTargets(archetype, index + 1, targets)
 end
 
-local queries = {
-	[1] = world:query(replicated):cached(),
-	[2] = world:query(pair(replicated, Wildcard)):cached(),
-}
 
-local function getPackets(): () -> (number?, Packet?)
+-- PUBLIC API
+function feces.init(newWorld: jecs.World)
+	assert(newWorld, "You must provide a world to feces")
+	world = newWorld
+	queries = {
+		[1] = world:query(replicated):cached(),
+		[2] = world:query(pair(replicated, Wildcard)):cached(),
+	}
+	replicated = world:component() :: jecs.Id<PlayerObject>
+end
+
+function feces.getPackets(): () -> (number?, Packet?)
+	assert(queries and world, "You must provide a world by calling feces.init before feces.getPackets")
 	local packets: { Packet } = {}
-	local systemPackets: { [boolean]: { public: Packet } & { [Player]: Packet } } = {
+	local systemPackets: { public: Packet } & { [Player]: Packet } = {
 		public = makePacket(),
 	}
 
-	local playerLinks = {}
+	local playerLinks: {[number]: Player} = {}
 	
 	for key, query in queries do
 		local isPair: boolean = key == 2
-		local group = systemPackets
 		for _, archetype in query:archetypes() do
 			local entities: { number } = archetype.entities
 			local columns: { any } = archetype.columns
 
 			--go through entities
 			for row, entity: any in entities do
+				local stringEntity = tostring(entity)
 				for columnNumber: number, column in columns do
 					if isPair then	
-						local targets = getAllTargets(archetype, 0)
+						local targets = getAllTargets(archetype, 0, {})
 						if not targets then
 							continue
 						end
@@ -257,16 +275,15 @@ local function getPackets(): () -> (number?, Packet?)
 							playerLinks[componentId] = playerValue
 							
 							addChanges(
-								tostring(entity),
+								stringEntity,
 								componentId,
 								componentValue,
-								group,
-								key,
+								systemPackets,
 								playerValue
 							)
 						end
 					else
-						local componentId: string = tostring(archetype.types[columnNumber])
+						local componentId: number = archetype.types[columnNumber]
 						local componentValue = column[row]
 						if type(componentValue) == "function" then
 							continue
@@ -277,11 +294,10 @@ local function getPackets(): () -> (number?, Packet?)
 						playerLinks[componentId] = playerValue
 
 						addChanges(
-							tostring(entity),
+							stringEntity,
 							componentId,
 							componentValue,
-							group,
-							key,
+							systemPackets,
 							playerValue
 						)
 					end
@@ -290,31 +306,34 @@ local function getPackets(): () -> (number?, Packet?)
 		end
 	end
 	
-	for entity, components in previous do
-		entity = tonumber(entity)
+	for stringEntity, components in previous do
+		local entity = assertNumber(stringEntity)
 		if not world:contains(entity) then
-			systemPackets.public.entities[tostring(entity)] = DELETE_VALUE
-			previous[tostring(entity)] = nil
+			systemPackets.public.entities[stringEntity] = DELETE_VALUE
+			previous[stringEntity] = nil
 			print("REGISTERING DELETE:", entity)
 			continue
 		end
 
-		for id in components do
-			id = tonumber(id)
+		if type(components) ~= "table" then
+			continue
+		end
+
+		for stringId in components do
+			local id = assertNumber(stringId)
 			world:set(id, onRemove, function(ent)
 				if ent == entity then
-					previous[tostring(entity)][tostring(id)] = nil
+					previous[stringEntity][stringId] = nil
 					local playerData = getPlayers(playerLinks[id])
 					if playerData then
 						for _, player in playerData do
-							systemPackets[player].entities[entity][id] = DELETE_VALUE
+							systemPackets[player].entities[stringEntity][stringId] = DELETE_VALUE
 						end
 						return
 					end
 					
-					entity = tostring(entity)
-					systemPackets.public.entities[entity] = systemPackets.public.entities[entity] or {}
-					systemPackets.public.entities[entity][tostring(id)] = DELETE_VALUE
+					systemPackets.public.entities[stringEntity] = systemPackets.public.entities[stringEntity] or {}
+					systemPackets.public.entities[stringEntity][stringId] = DELETE_VALUE
 				end
 			end)
 		end
@@ -341,47 +360,45 @@ local function getPackets(): () -> (number?, Packet?)
 	end
 end
 
-local Players = game:GetService("Players")
-local ctx = require(ReplicatedStorage.Components)
-local function applyPackets(entities: EntityChanges)
+function feces.applyPackets(entities: EntityChanges)
+	assert(world, "You must provide a world by calling feces.init before feces.applyPackets")
 	for entity: any, components in entities do
-		entity = ref(`repl{entity}`)
-		if components == DELETE_VALUE then
-			local model = entity:get(ctx.Model)
-			if model then
-				model:Destroy()
-			end
+		entity = ref(world, `repl{entity}`)
+		if type(components) ~= "table" then 
 			entity:delete()
 			continue
 		end
 		
 		for id, component in components do
-			if component == game:GetService("Players").LocalPlayer then
-				refs["LocalPlayer"] = entity
-				refs[component.UserId] = entity
-			elseif typeof(component) == "Instance" and component:IsDescendantOf(Players) then
-				refs[component.UserId] = entity
-			end
+			-- if component == Players.LocalPlayer then
+			-- 	refs["LocalPlayer"] = entity
+			-- 	refs[component.UserId] = entity
+			-- elseif typeof(component) == "Instance" and component:IsA("Player") then
+			-- 	refs[component.UserId] = entity
+			-- end
 			if component == DELETE_VALUE then
-				entity:remove(tonumber(id))
+				entity:remove(assertNumber(id))
 				continue
 			end
 			
-			entity:set(tonumber(id), if component == NIL_VALUE then nil else component)
+			entity:set(assertNumber(id), if component == NIL_VALUE then nil else component)
 		end
 	end
 end
 
-local function filterPackets(entities: EntityChanges, ...: component<any>)
-	local componentMap: { [component<any>]: true? } = {}
+function feces.filterPackets(entities: EntityChanges, ...: jecs.Id<any>)
+	local componentMap: { [jecs.Id<any>]: true? } = {}
 	for _, componentId in { ... } do
 		componentMap[componentId] = true
 	end
 
 	local filtered = {}
 	for entity, components in entities do
+		if type(components) ~= "table" then
+			continue
+		end
 		for id, component in components do
-			if componentMap[`repl{id}` :: component<any>] then
+			if componentMap[`repl{id}` :: jecs.Id<any>] then
 				filtered[entity] = filtered[entity] or {}
 				filtered[entity][id] = component
 			end
@@ -391,20 +408,13 @@ local function filterPackets(entities: EntityChanges, ...: component<any>)
 	return filtered
 end
 
-local function skimChanges(
-	entity,
-	componentId,
-	componentValue,
-	packet,
-	key,
-	playerValue
-)
-	componentId = tostring(componentId)
+local function skimChanges(entity: string, componentId: string, componentValue, packet)
 	packet[entity] = packet[entity] or {}
 	packet[entity][componentId] = componentValue
 end
 
-local function getFullPacket()
+function feces.getFullPacket()
+	assert(queries and world, "You must provide a world by calling feces.init before feces.getFullPacket")
 	local packet = {}
 	
 	for key, query in queries do
@@ -414,10 +424,11 @@ local function getFullPacket()
 			local columns: { any } = archetype.columns
 
 			--go through entities
-			for row, entity: any in entities do
+			for row, entity: jecs.Entity in entities do
+				local stringEntity = tostring(entity)
 				for columnNumber: number, column in columns do
 					if isPair then	
-						local targets = getAllTargets(archetype, 0)
+						local targets = getAllTargets(archetype, 0, {})
 						if not targets then
 							continue
 						end
@@ -433,12 +444,10 @@ local function getFullPacket()
 							end
 
 							skimChanges(
-								tostring(entity),
-								componentId,
+								stringEntity,
+								tostring(componentId),
 								componentValue,
-								packet,
-								key,
-								playerValue
+								packet
 							)
 						end
 					else
@@ -454,12 +463,10 @@ local function getFullPacket()
 						end
 
 						skimChanges(
-							tostring(entity),
+							stringEntity,
 							componentId,
 							componentValue,
-							packet,
-							key,
-							playerValue
+							packet
 						)
 					end
 				end
@@ -470,9 +477,4 @@ local function getFullPacket()
 	return packet
 end
 
-return {
-	getPackets = getPackets,
-	applyPackets = applyPackets,
-	filterPackets = filterPackets,
-	getFullPacket =  getFullPacket,
-}
+return table.freeze(feces) :: typeof(feces)
