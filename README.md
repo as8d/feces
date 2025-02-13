@@ -1,4 +1,6 @@
-# feces
+<div align="center">
+    <img src="logo.png" width="600" />
+</div>
 #### _"Fast Entity Component Export System"_
 
 A generalized replication system for [jecs](https://github.com/ukendio/jecs) that allows for easy and fast replication of components.
