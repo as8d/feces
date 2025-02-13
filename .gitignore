@@ -1,0 +1,10 @@
+# Project place file
+/feces.rbxlx
+
+
+/*.rbxlx.lock
+/*.rbxl.lock
+
+
+.vscode
+sourcemap.json
