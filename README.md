@@ -26,7 +26,6 @@ feces.getFullPacket :: () -> Packet
 ```luau
 feces.applyPackets :: (EntityChanges) -> ()
 feces.filterPackets :: (EntityChanges, ...: component<any>) -> ({ entity<any> }, { component<any> })
-feces.gatherComponents :: (Jecs.Query) -> ({ entity<any> }, { component<any> })
 ```
 
 `applyPackets` applies the packets to the world
