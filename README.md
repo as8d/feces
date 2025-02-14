@@ -51,12 +51,3 @@ Either copy the code manually or use pesde:
 ```sh
 pesde add neond00m/feces
 ```
-
-<br>
-
-### TODO:
-- [ ] change output to provide the packets by component, allowing better replication through compiling libraries
-    - [ ] reduce string key usage and opt for contiguous lists if possible?
-- [x] add example
-- [x] add method to filter components that can be replicated to prevent mistakes?
-
