@@ -6,5 +6,8 @@
 /*.rbxl.lock
 
 
+*_packages
+.pesde
+
 .vscode
 sourcemap.json
