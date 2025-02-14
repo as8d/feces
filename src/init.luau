@@ -408,12 +408,12 @@ function feces.filterPackets(entities: EntityChanges, ...: jecs.Id<any>)
 	return filtered
 end
 
-local function skimChanges(entity: string, componentId: string, componentValue, packet)
+local function skimChanges(entity: string, componentId: string, componentValue, packet: EntityValues)
 	packet[entity] = packet[entity] or {}
 	packet[entity][componentId] = componentValue
 end
 
-function feces.getFullPacket()
+function feces.getFullPacket(): EntityChanges
 	assert(queries and world, "You must provide a world by calling feces.init before feces.getFullPacket")
 	local packet = {}
 	
