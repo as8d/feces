@@ -1,5 +1,4 @@
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local jecs = require("../roblox_packages/jecs")
 local feces = require("../src")
@@ -9,7 +8,7 @@ local getPackets = feces.getPackets
 local applyPackets = feces.applyPackets
 local getFullPacket = feces.getFullPacket
 
-local Remote = ReplicatedStorage.Remote
+local Remote = path.to.Remote
 
 local function replicate()
 	-- iterate through new packets (difference is calculated from last getPackets call)

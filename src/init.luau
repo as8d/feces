@@ -47,7 +47,7 @@ local ECS_ID_FLAGS_MASK = 0x10
 
 local world: jecs.World, replicated: jecs.Id<PlayerObject>, queries: {jecs.Query<any>} = nil, nil, {}
 local feces = {
-	component = replicated,
+	replicated = replicated,
 }
 
 -- PRIVATE FUNCTIONS
@@ -234,11 +234,11 @@ end
 function feces.init(newWorld: jecs.World)
 	assert(newWorld, "You must provide a world to feces")
 	world = newWorld
+	replicated = world:component() :: jecs.Id<PlayerObject>
 	queries = {
 		[1] = world:query(replicated):cached(),
 		[2] = world:query(pair(replicated, Wildcard)):cached(),
 	}
-	replicated = world:component() :: jecs.Id<PlayerObject>
 end
 
 function feces.getPackets(): () -> (number?, Packet?)
